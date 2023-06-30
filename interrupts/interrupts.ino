@@ -8,9 +8,15 @@ const int ledPin =  13;      // the number of the LED pin
 const int pwmPinUp =  9;
 const int pwmPinDown =  10;
 const int dirPin =  8;
+const int debugPin =  12;
+
+const int minPwm=64;
+const int maxPwm=192;
+const int maxPosition=5000;
+const int minPosition=0;
 
 // variables will change:
-volatile int counter = 0;         // variable for reading the pushbutton status
+volatile int rawPosition = 0;         // variable for reading the pushbutton status
 
 
 void setup() {
@@ -19,6 +25,7 @@ void setup() {
   pinMode(pwmPinUp, OUTPUT);
   pinMode(pwmPinDown, OUTPUT);
   pinMode(dirPin, OUTPUT);
+  pinMode(debugPin, OUTPUT);
   
   // initialize the pushbutton pin as an input:
   pinMode(hallPin1, INPUT);
@@ -34,27 +41,21 @@ void setup() {
 }
 
 void loop() {
-  Serial.println(counter);
+  Serial.println(rawPosition);
   delay(1000);
   blinkLed();
   
+  digitalWrite(debugPin, LOW);
+  digitalWrite(debugPin, HIGH);
+  goToPosition(400);
+  digitalWrite(debugPin, LOW);
   
-  runMotor(UP,127);
-  delay(5000);
-  Serial.println(counter);
   
-  stopMotor();
+  Serial.println("max reached");
+  
   delay(1000);
-  
-  runMotor(DOWN,127);
-  delay(5000);
-  Serial.println(counter);
-  
-  
-  stopMotor();
-  delay(1000);
-  
-  
+  goToPosition(0);
+  Serial.println("min reached");
  
   
   
@@ -63,12 +64,12 @@ void loop() {
 
 void hall_ISR() {
   if(digitalRead(hallPin2)==0) {
-    counter++;
+    rawPosition++;
   }
     else {
-      counter--;
+      rawPosition--;
     }
-  
+   Serial.println(rawPosition);
 }
 
 void blinkLed(){
@@ -103,3 +104,25 @@ void stopMotor(){
  runMotor(UP,0);
  runMotor(DOWN,0);
 }
+
+int goToPosition(int destPosition){
+  //checking input data
+  if (destPosition > maxPosition) destPosition=maxPosition;
+  else if (destPosition < minPosition) destPosition=minPosition;
+  
+    if(destPosition>rawPosition){//going up
+      while(rawPosition<destPosition){
+      runMotor(UP,100);
+      }
+      
+    }
+    else if(destPosition<rawPosition){//going down
+      while(rawPosition>destPosition){
+      runMotor(DOWN,100);
+      }
+    }
+    
+  stopMotor();
+  return 0;
+}
+

@@ -1,3 +1,31 @@
+/*
+TODO
+
+current sensing + status flag diagnosis
+moving by pushbutton
+normalization
+
+errors and malfunctions detection
+-missing hall
+-overcurrent
+-moving too long
+-duty cycle
+
+reseting
+setting upper limit
+setting lower limit
+deleteing limits
+
+saving positions
+restoring positions
+
+setting and removing detection collision sensitivity
+
+connect and control enable pins 
+
+sleep mode?
+
+*/
 #define UP 1
 #define DOWN 2
 
@@ -9,6 +37,7 @@ const int pwmPinUp =  9;
 const int pwmPinDown =  10;
 const int dirPin =  8;
 const int debugPin =  12;
+const int currentSensePin =  A3;
 
 const int minPwm=64;
 const int maxPwm=192;
@@ -61,6 +90,8 @@ void loop() {
   delay(1000);
   goToPosition(0);
   Serial.println("min reached");
+  
+  runMotor(DOWN, 75);
   
   while(1) blinkLed();
   

@@ -56,7 +56,7 @@ const int debugPin =  12;
 const int minPwm=64;
 const int maxPwm=192;
 
-const int slopeDistance=20;//hall ticks needed for smooth motor start - distance for pwn increase/decrease
+const int slopeDistance=50;//hall ticks needed for smooth motor start - distance for pwn increase/decrease
 const int maxAdcCurrentUpRaw=669;//4000 mA limit
 const int maxAdcCurrentDownRaw=167;//1000 mA limit
 const int adcArraySize=100;//size of the array used for averaging adc readouts
@@ -142,9 +142,10 @@ void loop() {
   
   Serial.println("start of normalization");
   //minPosition=normalizationLow();
-  maxPosition=normalizationHigh();
-  Serial.print("stop of normalization, min. position: ");
-  Serial.println(minPosition);
+  maxPosition=normalizationHigh(3000);
+  
+  Serial.print("stop of normalization, max. position: ");
+  Serial.println(maxPosition);
   //Serial.print("position ");
   //Serial.println(rawPosition);
   
@@ -329,7 +330,7 @@ int goToPosition(int destPosition){
   else if (destPosition < minPosition) destPosition=minPosition;
   
     if(destPosition>rawPosition){//going up
-      while(rawPosition<=destPosition){
+      while(rawPosition<=destPosition /*&& adcAvg<maxAdcCurrentUpRaw*/ ){
         actualDistance=destPosition-rawPosition;
                 
         runMotor(UP,momentaryPwm(actualDistance,setDistance) );
@@ -419,12 +420,28 @@ int normalizationLow(){
 	
 }
 
-int normalizationHigh(){
-	while(adcAvg<maxAdcCurrentUpRaw){
-		runMotor(UP,128);
+int normalizationHigh(int destPosition){
+	 int setDistance=abs(destPosition-rawPosition);
+     int actualDistance=0;
+	
+	 while(rawPosition<=destPosition && adcAvg<maxAdcCurrentUpRaw ){
+        actualDistance=destPosition-rawPosition;
+                
+        runMotor(UP,momentaryPwm(actualDistance,setDistance) );
+       // Serial.println(rawPosition);
+      
+      
+      }
+	
+	
+	/*
+	while(adcAvg<maxAdcCurrentUpRaw  && latch==0){
+		//runMotor(UP,128);
+		goToPosition(100);
 	}
+	*/
 	stopMotor();
-	Serial.print("maximum position: ");
+	Serial.print("-----------------maximum position: ");
 	Serial.println(rawPosition);
 	return rawPosition;
 	

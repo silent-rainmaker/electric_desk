@@ -3,7 +3,7 @@ TODO
 
 [X] current sensing + 
 [ ] status flag diagnosis
-[ ] moving by pushbutton
+[X] moving by pushbutton
 [ ] normalization
 
 errors and malfunctions detection
@@ -11,6 +11,7 @@ errors and malfunctions detection
 [ ] -overcurrent
 [ ] -moving too long
 [ ] -duty cycle (thermal)
+[ ] -stopping actual operation if button pressed
 
 [ ] reseting
 [ ] setting upper limit
@@ -33,15 +34,19 @@ sleep mode?
 #define UP 1
 #define DOWN 2
 
-
+//inputs
 const int hallPin1 = 2;     // hall sensor 1 connected to pin2
 const int hallPin2 = 7;     // hall sensor 2 connected to pin7
+const int currentSensePin =  A0;
+const int buttonPinUp=4;
+const int buttonPinDown=5;
+
+//outputs
 const int ledPin =  13;      // the number of the LED pin
 const int pwmPinUp =  9;
 const int pwmPinDown =  10;
 const int dirPin =  8;
 const int debugPin =  12;
-const int currentSensePin =  A0;
 
 const int minPwm=64;
 const int maxPwm=192;
@@ -57,12 +62,21 @@ volatile int adcSum=0;
 volatile int adcAvg=0;
 
 int pwmArr[slopeDistance];
-int adcArray[adcArraySize]/*={100,50,100,50,100,50,100,50,100,50}*/;//can be removed, probably
+//int adcArray[adcArraySize]/*={100,50,100,50,100,50,100,50,100,50}*/;//can be removed, probably
 
+int ledState = HIGH;        // the current state of the output pin
+int buttonUpState;            // the current reading from the input pin
+int lastButtonUpState = LOW;  // the previous reading from the input pin
+int buttonDownState;            // the current reading from the input pin
+int lastButtonDownState = LOW;  // the previous reading from the input pin
 
+// the following variables are unsigned longs because the time, measured in
+// milliseconds, will quickly become a bigger number than can be stored in an int.
+unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
+unsigned long debounceDelay = 50;    // the debounce time; increase if the output flickers
 
 void setup() {
-  zeroingAvgCurrArr();
+  //zeroingAvgCurrArr();
   
   // initialize pins as an outputs:
   pinMode(ledPin, OUTPUT);
@@ -71,9 +85,15 @@ void setup() {
   pinMode(dirPin, OUTPUT);
   pinMode(debugPin, OUTPUT);
   
-  // initialize pins as an input:
+  // initialize pins as an inputs:
   pinMode(hallPin1, INPUT);
   pinMode(hallPin2, INPUT);
+  
+  pinMode(buttonPinUp, INPUT_PULLUP);
+  pinMode(buttonPinDown, INPUT_PULLUP);
+  
+  // set initial LED state
+  digitalWrite(ledPin, ledState);
   
   //pwm settings
   TCCR1A = 0b00000001; // 8bit
@@ -103,10 +123,72 @@ void setup() {
 
 void loop() {
   calculatePwm(pwmArr,slopeDistance);
-  Serial.print("position ");
-  Serial.println(rawPosition);
-  delay(500);
-  blinkLed();
+ 
+  int readingUp = digitalRead(buttonPinUp);
+  int readingDown = digitalRead(buttonPinDown);
+  
+  if (readingUp != lastButtonUpState) {
+    // reset the debouncing timer
+    lastDebounceTime = millis();
+  }
+  
+  if (readingDown != lastButtonDownState) {// assuming there is no other button press while counting debounce time
+    // reset the debouncing timer
+    lastDebounceTime = millis();
+  }
+  
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    // whatever the reading is at, it's been there for longer than the debounce
+    // delay, so take it as the actual current state:
+
+    // if the button state has changed:
+    if (readingUp != buttonUpState) {
+      buttonUpState = readingUp;
+
+      // only toggle the LED if the new button state is HIGH
+      if (buttonUpState == HIGH) {
+        ledState = LOW;
+        stopMotor();
+      }
+      if (buttonUpState == LOW) {
+        ledState = HIGH;
+        runMotor(UP, 75);
+      }
+    }
+  }
+  
+   if ((millis() - lastDebounceTime) > debounceDelay) {
+    // whatever the reading is at, it's been there for longer than the debounce
+    // delay, so take it as the actual current state:
+
+    // if the button state has changed:
+    if (readingDown != buttonDownState) {
+      buttonDownState = readingDown;
+
+      // only toggle the LED if the new button state is HIGH
+      if (buttonDownState == HIGH) {
+        ledState = LOW;
+        stopMotor();
+      }
+      if (buttonDownState == LOW) {
+        ledState = HIGH;
+        runMotor(DOWN, 75);
+      }
+    }
+  }
+  
+  // set the LED:
+  digitalWrite(ledPin, ledState);
+
+  // save the reading. Next time through the loop, it'll be the lastButtonState:
+  lastButtonUpState = readingUp;
+  lastButtonDownState = readingDown;
+  
+  
+  //Serial.print("position ");
+  //Serial.println(rawPosition);
+  //delay(500);
+  //blinkLed();
   
   /*
   Serial.println("start moving");
@@ -122,33 +204,17 @@ void loop() {
   goToPosition(0);
   Serial.println("min reached");
   */
+  
+  /*
   runMotor(DOWN, 175);//down because current read will not work
   delay(50);
   while(1) {
     Serial.print("ADC: ");
     Serial.println(adcAvg);
-    //Serial.println(adcValue);
-    //delay(100);
-    //blinkLed();
     
-    /*
-    for(int j=0;j<adcArraySize;j++){
-		
-		Serial.print(j);
-		Serial.print(": ");
-		Serial.print(adcArray[j]);
-		Serial.print(", ");
-		
-		//avgCurrent+=adcArray[j];
-		/*
-		Serial.print("subsum  ");
-		Serial.println(avgCurrent);
-		
-		}
-		*/
 	}
 	
-    
+    */
  
   
   
@@ -317,37 +383,12 @@ int calculatePwm (int* arr, int arrSize){
   return 0;
 }
 
-int getCurrentAvg(){
-	//ADCSRA &= ~(1 << ADIE);//Disable adc int
-	int avgCurrent=0;
-	
-	//Serial.println("-----------------------");
-	for(int j=0;j<adcArraySize;j++){
-		/*
-		Serial.print(j);
-		Serial.print(": ");
-		Serial.println(adcArray[j]);
-		*/
-		avgCurrent+=adcArray[j];
-		/*
-		Serial.print("subsum  ");
-		Serial.println(avgCurrent);
-		*/
-	}
-	/*
-	Serial.print("sum for avg: ");
-	Serial.println(avgCurrent);
-	Serial.println("-----------------------");
-	*/
-	return avgCurrent/adcArraySize;
-	//ADCSRA |= (1 << ADIE);// Enable ADC interrupt
-	//return -255;
-}
 
-
+/*
 int zeroingAvgCurrArr(){
 	for (int i=0;i<adcArraySize;i++){
 	adcArray[i]=0;
 	}
 	
 }
+*/

@@ -5,6 +5,10 @@ TODO
 [ ] status flag diagnosis
 [X] moving by pushbutton
 [ ] normalization
+[ ] determine positions and current ranges
+[x] convert impulses to cm
+[ ] position drift
+[ ] different speeds and slopes for upward and downward movement
 
 errors and malfunctions detection
 [ ] -missing hall (only one,both)
@@ -12,6 +16,7 @@ errors and malfunctions detection
 [ ] -moving too long
 [ ] -duty cycle (thermal)
 [ ] -stopping actual operation if button pressed
+[ ] uptime - when  motor movemend command is set but no feedback from hall nor adc
 
 [ ] reseting
 [ ] setting upper limit
@@ -31,8 +36,8 @@ sleep mode?
 [ ] separate calibartion for each channel current measurements
 
 */
-#define UP 1
-#define DOWN 2
+#define UP 2
+#define DOWN 1
 
 //inputs
 const int hallPin1 = 2;     // hall sensor 1 connected to pin2
@@ -50,19 +55,24 @@ const int debugPin =  12;
 
 const int minPwm=64;
 const int maxPwm=192;
-const int maxPosition=5000;
-const int minPosition=0;
-const int slopeDistance=200;//hall ticks needed for smooth motor start - distance for pwn increase/decrease
+
+const int slopeDistance=20;//hall ticks needed for smooth motor start - distance for pwn increase/decrease
+const int maxAdcCurrentUpRaw=669;//4000 mA limit
+const int maxAdcCurrentDownRaw=167;//1000 mA limit
 const int adcArraySize=100;//size of the array used for averaging adc readouts
 
 volatile int rawPosition = 0;         // variable for reading the pushbutton status
 volatile int adcValue = 0;
 volatile int adcCounter=0;
-volatile int adcSum=0;
+volatile long int adcSum=0;
 volatile int adcAvg=0;
 
 int pwmArr[slopeDistance];
 //int adcArray[adcArraySize]/*={100,50,100,50,100,50,100,50,100,50}*/;//can be removed, probably
+
+int minPosition=0;
+int maxPosition=5000;
+
 
 int ledState = HIGH;        // the current state of the output pin
 int buttonUpState;            // the current reading from the input pin
@@ -103,7 +113,7 @@ void setup() {
 
   
   // Attach an interrupt to the ISR vector
-  //attachInterrupt(0, hall_ISR, FALLING);
+  attachInterrupt(0, hall_ISR, FALLING);
   // attachInterrupt(digitalPinToInterrupt(hallPin1), hall_ISR, FALLING);
  
   // Configure ADC
@@ -123,8 +133,46 @@ void setup() {
 
 void loop() {
   calculatePwm(pwmArr,slopeDistance);
- 
-  int readingUp = digitalRead(buttonPinUp);
+  Serial.println("Normalization will start in 3s ");
+  delay(1000);
+  Serial.println("2s ");
+  delay(1000);
+  Serial.println("1s ");
+  delay(1000);
+  
+  Serial.println("start of normalization");
+  //minPosition=normalizationLow();
+  maxPosition=normalizationHigh();
+  Serial.print("stop of normalization, min. position: ");
+  Serial.println(minPosition);
+  //Serial.print("position ");
+  //Serial.println(rawPosition);
+  
+  //blinkLed();
+  
+  
+  delay(2000);
+  Serial.println("start moving");
+  
+ // goToPosition(100);
+
+  Serial.println("stop moving");
+  
+  Serial.println("max reached");
+  
+  delay(1000);
+ // goToPosition(0);
+  Serial.println("min reached");
+  
+  
+  
+  //runMotor(DOWN, 175);//down because current read will not work
+  delay(50);
+  
+   Serial.println("wainting for button press");
+  while(1) {
+   
+   int readingUp = digitalRead(buttonPinUp);
   int readingDown = digitalRead(buttonPinDown);
   
   if (readingUp != lastButtonUpState) {
@@ -137,7 +185,7 @@ void loop() {
     lastDebounceTime = millis();
   }
   
-  if ((millis() - lastDebounceTime) > debounceDelay) {
+  if ((millis() - lastDebounceTime) > debounceDelay) {//go up
     // whatever the reading is at, it's been there for longer than the debounce
     // delay, so take it as the actual current state:
 
@@ -152,12 +200,13 @@ void loop() {
       }
       if (buttonUpState == LOW) {
         ledState = HIGH;
-        runMotor(UP, 75);
+        runMotor(UP, maxPwm);
+        Serial.println("moving up");
       }
     }
   }
   
-   if ((millis() - lastDebounceTime) > debounceDelay) {
+   if ((millis() - lastDebounceTime) > debounceDelay) {//go down
     // whatever the reading is at, it's been there for longer than the debounce
     // delay, so take it as the actual current state:
 
@@ -172,7 +221,8 @@ void loop() {
       }
       if (buttonDownState == LOW) {
         ledState = HIGH;
-        runMotor(DOWN, 75);
+        runMotor(DOWN, 120);
+        Serial.println("moving down");
       }
     }
   }
@@ -183,38 +233,10 @@ void loop() {
   // save the reading. Next time through the loop, it'll be the lastButtonState:
   lastButtonUpState = readingUp;
   lastButtonDownState = readingDown;
-  
-  
-  //Serial.print("position ");
-  //Serial.println(rawPosition);
-  //delay(500);
-  //blinkLed();
-  
-  /*
-  Serial.println("start moving");
-  digitalWrite(debugPin, LOW);
-  digitalWrite(debugPin, HIGH);
-  goToPosition(500);
-  digitalWrite(debugPin, LOW);
-  Serial.println("stop moving");
-  
-  Serial.println("max reached");
-  
-  delay(1000);
-  goToPosition(0);
-  Serial.println("min reached");
-  */
-  
-  /*
-  runMotor(DOWN, 175);//down because current read will not work
-  delay(50);
-  while(1) {
-    Serial.print("ADC: ");
-    Serial.println(adcAvg);
     
 	}
 	
-    */
+  
  
   
   
@@ -227,9 +249,10 @@ void hall_ISR() {
     else {
       rawPosition--;
     }
-   //Serial.println(rawPosition);
+ // Serial.println(rawPosition);
+ // Serial.print("; ");
+  Serial.println(adcAvg);
 }
-
 
 ISR(ADC_vect) {// ADC conversion complete interrupt handler
   
@@ -248,6 +271,7 @@ ISR(ADC_vect) {// ADC conversion complete interrupt handler
     */
     //adcValue = ADC;
     
+    //adcAvg = ADC;
     
     adcSum+=ADC;
     adcCounter++;
@@ -275,12 +299,12 @@ int runMotor(int dir, int pwm){
   if (pwm<0) pwm=0;
   if (pwm>255) pwm=255;
   
-  if(dir==UP){
+  if(dir==DOWN){
   digitalWrite(dirPin, HIGH);
   analogWrite(pwmPinUp, pwm);
   
   }
-  else if (dir==DOWN) {
+  else if (dir==UP) {
   digitalWrite(dirPin, LOW);
   analogWrite(pwmPinDown, pwm);
   }
@@ -305,11 +329,11 @@ int goToPosition(int destPosition){
   else if (destPosition < minPosition) destPosition=minPosition;
   
     if(destPosition>rawPosition){//going up
-      while(rawPosition<destPosition){
+      while(rawPosition<=destPosition){
         actualDistance=destPosition-rawPosition;
                 
         runMotor(UP,momentaryPwm(actualDistance,setDistance) );
-       //runMotor(UP,100 );
+       // Serial.println(rawPosition);
       
       
       }
@@ -317,9 +341,10 @@ int goToPosition(int destPosition){
     else if (destPosition > maxPosition) destPosition=minPosition;
     
     else if(destPosition<rawPosition){//going down
-      while(rawPosition>destPosition){
+      while(rawPosition>=destPosition){
       actualDistance=rawPosition-destPosition;
           runMotor(DOWN,momentaryPwm(actualDistance,setDistance));
+         // Serial.println(rawPosition);
       }
     }
     
@@ -383,6 +408,27 @@ int calculatePwm (int* arr, int arrSize){
   return 0;
 }
 
+int normalizationLow(){
+	while(adcAvg<maxAdcCurrentDownRaw){
+		runMotor(DOWN,minPwm);
+	}
+	stopMotor();
+	Serial.print("minimum position: ");
+	Serial.println(rawPosition);
+	return rawPosition;
+	
+}
+
+int normalizationHigh(){
+	while(adcAvg<maxAdcCurrentUpRaw){
+		runMotor(UP,128);
+	}
+	stopMotor();
+	Serial.print("maximum position: ");
+	Serial.println(rawPosition);
+	return rawPosition;
+	
+}
 
 /*
 int zeroingAvgCurrArr(){

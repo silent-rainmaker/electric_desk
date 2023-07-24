@@ -4,11 +4,12 @@ TODO
 [X] current sensing + 
 [ ] status flag diagnosis
 [X] moving by pushbutton
-[ ] normalization
+[WIP] normalization
 [ ] determine positions and current ranges
 [x] convert impulses to cm
 [ ] position drift
 [ ] different speeds and slopes for upward and downward movement
+[ ] pwm slope for operation from buttons
 
 errors and malfunctions detection
 [ ] -missing hall (only one,both)
@@ -42,7 +43,8 @@ sleep mode?
 //inputs
 const int hallPin1 = 2;     // hall sensor 1 connected to pin2
 const int hallPin2 = 7;     // hall sensor 2 connected to pin7
-const int currentSensePin =  A0;
+const int currentSensePinUP =  A0;// Up direction
+const int currentSensePinDown =  A1;// Up direction
 const int buttonPinUp=4;
 const int buttonPinDown=5;
 
@@ -57,15 +59,20 @@ const int minPwm=64;
 const int maxPwm=192;
 
 const int slopeDistance=50;//hall ticks needed for smooth motor start - distance for pwn increase/decrease
-const int maxAdcCurrentUpRaw=669;//4000 mA limit
+const int maxAdcCurrentUpRaw=669;//4000 mA limit; y=a*x+b; a=5.93, b=34.02
 const int maxAdcCurrentDownRaw=167;//1000 mA limit
 const int adcArraySize=100;//size of the array used for averaging adc readouts
 
 volatile int rawPosition = 0;         // variable for reading the pushbutton status
 volatile int adcValue = 0;
-volatile int adcCounter=0;
-volatile long int adcSum=0;
-volatile int adcAvg=0;
+volatile int adcValueDown = 0;
+volatile int adcCounterUp=0;
+volatile int adcCounterDown=0;
+volatile long int adcSumUp=0;
+volatile long int adcSumDown=0;
+volatile int adcAvgUp=0;
+volatile int adcAvgDown=0;
+
 
 int pwmArr[slopeDistance];
 //int adcArray[adcArraySize]/*={100,50,100,50,100,50,100,50,100,50}*/;//can be removed, probably
@@ -142,7 +149,7 @@ void loop() {
   
   Serial.println("start of normalization");
   //minPosition=normalizationLow();
-  maxPosition=normalizationHigh(3000);
+  //maxPosition=normalizationHigh(3000);
   
   Serial.print("stop of normalization, max. position: ");
   Serial.println(maxPosition);
@@ -152,25 +159,25 @@ void loop() {
   //blinkLed();
   
   
-  delay(2000);
-  Serial.println("start moving");
+  delay(1000);
+  //Serial.println("start moving");
   
  // goToPosition(100);
 
-  Serial.println("stop moving");
+  //Serial.println("stop moving");
   
-  Serial.println("max reached");
+  //Serial.println("max reached");
   
-  delay(1000);
+  //delay(1000);
  // goToPosition(0);
-  Serial.println("min reached");
+  //Serial.println("min reached");
   
   
   
   //runMotor(DOWN, 175);//down because current read will not work
   delay(50);
   
-   Serial.println("wainting for button press");
+   Serial.println("waitng for button press");
   while(1) {
    
    int readingUp = digitalRead(buttonPinUp);
@@ -236,11 +243,7 @@ void loop() {
   lastButtonDownState = readingDown;
     
 	}
-	
-  
- 
-  
-  
+	 
 }
 
 void hall_ISR() {
@@ -252,36 +255,44 @@ void hall_ISR() {
     }
  // Serial.println(rawPosition);
  // Serial.print("; ");
-  Serial.println(adcAvg);
+  Serial.println(adcAvgUp);
+  //Serial.print(" | ");
+ // Serial.println(adcAvgDown);
 }
 
 ISR(ADC_vect) {// ADC conversion complete interrupt handler
+	
+    adcSumUp+=ADC;
+    adcCounterUp++;
+    if (adcCounterUp==adcArraySize-1){
+		adcAvgUp=adcSumUp/adcArraySize;
+		adcSumUp=0;
+		adcCounterUp=0;
+	}
   
-  /*adcValue = ADC; // Read ADC value
-  //Serial.print(adcValue);
-  //Serial.println(" ");
-  adcArray[adcCounter]=adcValue;
-  adcCounter++;
-  if (adcCounter==adcArraySize) {
-	  adcCounter=0; 
-	  
+  
+  /*
+  if (ADMUX & 0x0F == 0x00) {
+    
+    adcSumUp+=ADC;
+    adcCounterUp++;
+    if (adcCounterUp==adcArraySize-1){
+		adcAvgUp=adcSumUp/adcArraySize;
+		adcSumUp=0;
+		adcCounterUp=0;
+	}
   }
   
-    ADCSRA |= (1 << ADSC);// Start the next ADC conversion
-
-    */
-    //adcValue = ADC;
-    
-    //adcAvg = ADC;
-    
-    adcSum+=ADC;
-    adcCounter++;
-    if (adcCounter==adcArraySize-1){
-		adcAvg=adcSum/adcArraySize;
-		adcSum=0;
-		adcCounter=0;
+  else if (ADMUX & 0x0F == 0x01) {
+	  adcSumDown+=ADC;
+    adcCounterDown++;
+    if (adcCounterDown==adcArraySize-1){
+		adcAvgDown=adcSumDown/adcArraySize;
+		adcSumDown=0;
+		adcCounterDown=0;
 	}
-	
+  }
+  */
 	
 	ADCSRA |= (1 << ADSC);// Start the next ADC conversion
      
@@ -410,7 +421,7 @@ int calculatePwm (int* arr, int arrSize){
 }
 
 int normalizationLow(){
-	while(adcAvg<maxAdcCurrentDownRaw){
+	while(adcAvgDown<maxAdcCurrentDownRaw){
 		runMotor(DOWN,minPwm);
 	}
 	stopMotor();
@@ -424,7 +435,7 @@ int normalizationHigh(int destPosition){
 	 int setDistance=abs(destPosition-rawPosition);
      int actualDistance=0;
 	
-	 while(rawPosition<=destPosition && adcAvg<maxAdcCurrentUpRaw ){
+	 while(rawPosition<=destPosition && adcAvgUp<maxAdcCurrentUpRaw ){
         actualDistance=destPosition-rawPosition;
                 
         runMotor(UP,momentaryPwm(actualDistance,setDistance) );

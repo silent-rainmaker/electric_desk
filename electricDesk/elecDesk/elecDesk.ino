@@ -9,9 +9,10 @@ TODO
 [x] convert impulses to cm
 [ ] position drift
 [ ] different speeds and slopes for upward and downward movement
-[ ] pwm slope for operation from buttons
+[X] pwm slope for operation from buttons
 [ ] calibrate down current readings
-[WIP] overcurrent protection when button pressed and in max/min position
+[wip] overcurrent protection when button pressed and in max/min position
+[ ] pwm slope also when stopping from the buttons 
 
 errors and malfunctions detection
 [ ] -missing hall (only one,both)
@@ -21,6 +22,7 @@ errors and malfunctions detection
 [ ] -stopping actual operation if button pressed
 [ ] uptime - when  motor movemend command is set but no feedback from hall nor adc
 [ ] what if normalization starts in end position?
+[ ] lack of buttons 
 
 [ ] reseting
 [ ] setting upper limit
@@ -51,9 +53,12 @@ const int currentSensePinDown =  A1;// Up direction
 const int buttonPinUp=4;
 const int buttonPinDown=5;
 
+
+
+
 //outputs
 const int ledPin =  13;      // the number of the LED pin
-const int pwmPinUp =  9;
+const int pwmPinUp = 9;
 const int pwmPinDown =  10;
 const int dirPin =  8;
 const int debugPin =  12;
@@ -62,6 +67,7 @@ const int minPwm=64;
 const int maxPwm=192;
 
 const int slopeDistance=50;//hall ticks needed for smooth motor start - distance for pwn increase/decrease
+const int slopeTime=500;//time [ms] of increasing pwm value for manual operation
 const int maxAdcCurrentUpRaw=669;//4000 mA limit; y=a*x+b; a=5.93, b=34.02
 const int maxAdcCurrentDownRaw=500;//3000 mA limit
 const int adcArraySize=100;//size of the array used for averaging adc readouts
@@ -85,18 +91,32 @@ int storedPositions[maxStoredPos];
 
 int minPosition=0;
 int maxPosition=5000;
-int startPosition=0;//start position to determine pwm for button operation
+
 
 int ledState = HIGH;        // the current state of the output pin
-int buttonUpState = HIGH;            // the current reading from the input pin
-int lastButtonUpState = HIGH;  // the previous reading from the input pin
-int buttonDownState=HIGH;            // the current reading from the input pin
-int lastButtonDownState = HIGH;  // the previous reading from the input pin
+int buttonUpState=HIGH;            // the current reading from the input pin
+int buttonDownState=HIGH; 
+
+int buttonUpMasterState=HIGH;
+int buttonDownMasterState=HIGH; 
+
+int masterLastUpState=HIGH;
+int masterLastDownState=HIGH;
+
+int lastButtonUpState = LOW;  // the previous reading from the input pin
+int lastButtonDownState = LOW;  // the previous reading from the input pin
+
+int readingUp=LOW;
+int readingDown=LOW;
+
+boolean debugPinState=LOW;
 
 // the following variables are unsigned longs because the time, measured in
 // milliseconds, will quickly become a bigger number than can be stored in an int.
-unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
+unsigned long lastDebounceUpTime = 0;  // the last time the output pin was toggled
+unsigned long lastDebounceDownTime = 0;
 unsigned long debounceDelay = 50;    // the debounce time; increase if the output flickers
+unsigned long movingStartTime=0;	// start time for manual operation
 
 void setup() {
   //zeroingAvgCurrArr();
@@ -148,7 +168,11 @@ void setup() {
 }
 
 void loop() {
+  digitalWrite(debugPin, LOW);
   calculatePwm(pwmArr,slopeDistance);
+ 
+ {
+	 /*
   Serial.print("Low normalization will start in 3s ");
   delay(1000);
   Serial.print("2s ");
@@ -157,13 +181,16 @@ void loop() {
   delay(1000);
   
   Serial.println("low normalization started");
-  minPosition=normalizationLow(-3000);
+ // minPosition=normalizationLow(-3000);
   Serial.print("low normalization stopped, min. position: ");
   Serial.println(minPosition);
   
   delay(1000);
   
-  goToPosition(110);
+  //goToPosition(110);
+  */
+  
+}
   /*
   goToStoredPos(0);
   delay(1000);
@@ -182,114 +209,100 @@ void loop() {
   Serial.println(maxPosition);
   */ 
    
-   
-  delay(1000);
+ 
   
+  delay(1000);
+
+   
   
   //runMotor(DOWN, 175);//down because current read will not work
   delay(50);
   
-   Serial.println("waiting for the button to be pressed");
+   Serial.println("waitng for button press");
   while(1) {
+   //debugPinState= !debugPinState;
+   //digitalWrite(debugPin,  debugPinState);
+ 
+  buttonDownMasterState=getButtonDownState(); 
+ // buttonUpMasterState=getButtonUpState();
+ 
+  
+  //Serial.print("btn low state: ");
+  //Serial.println(buttonDownMasterState);
+  
+  
+ //Button up
+  if (buttonUpMasterState==LOW && masterLastUpState==HIGH){
+	 // movingStartTime=millis();
+		//Serial.print("up start time: ");
+		//Serial.println(movingStartTime); 
+	  masterLastUpState=LOW;
+  }
+   if (buttonUpMasterState==HIGH && masterLastUpState==LOW){
+	   masterLastUpState=HIGH;
+	   //Serial.print("LH");
+  }
+ /*
+ if ( (buttonUpMasterState==HIGH && masterLastUpState==HIGH) ||  (buttonUpMasterState==HIGH && masterLastUpState==HIGH) ){
+	   Serial.println("*");
+  }
+ */
+  //Button down
+  if (buttonDownMasterState==LOW && masterLastDownState==HIGH){
+	  //movingStartTime=millis();
+		//Serial.print("down start time: ");
+		//Serial.println(movingStartTime); 
+	  masterLastDownState=LOW;
+  }
+   if (buttonDownMasterState==HIGH && masterLastDownState==LOW){
+	   masterLastDownState=HIGH;
+	   //Serial.print("LH");
+  }
+    
+ 
    
-  int readingUp = digitalRead(buttonPinUp);
-  int readingDown = digitalRead(buttonPinDown);
   
-  if (readingUp != lastButtonUpState) {
-    // reset the debouncing timer
-    lastDebounceTime = millis();
-  }
-  
-  if (readingDown != lastButtonDownState) {// assuming there is no other button press while counting debounce time
-    // reset the debouncing timer
-    lastDebounceTime = millis();
-  }
-  
-  if ((millis() - lastDebounceTime) > debounceDelay) {//go up
-    // whatever the reading is at, it's been there for longer than the debounce
-    // delay, so take it as the actual current state:
-
-    // if the button state has changed:
-    if (readingUp != buttonUpState) {
-      buttonUpState = readingUp;
-		startPosition=rawPosition;
-      // only toggle the LED if the new button state is HIGH
-      if (buttonUpState == HIGH) {
-        ledState = LOW;
-        stopMotor();
-        Serial.println(rawPosition);
-      }
-      if (buttonUpState == LOW) {
-        ledState = HIGH;
-        runMotor(UP, maxPwm);
-        Serial.println("moving up");
-      }
-    }
-  }
-  
-   if ((millis() - lastDebounceTime) > debounceDelay) {//go down
-    // whatever the reading is at, it's been there for longer than the debounce
-    // delay, so take it as the actual current state:
-
-    // if the button state has changed:
-    if (readingDown != buttonDownState) {
-      buttonDownState = readingDown;
-	  //startPosition=rawPosition;
-
-      // only toggle the LED if the new button state is HIGH
-      if (buttonDownState == HIGH) {
-        ledState = LOW;
-        stopMotor();
-        Serial.println(rawPosition);
-      }
-      if (buttonDownState == LOW) {
-        ledState = HIGH;
-       //if(adcAvg<maxAdcCurrentDownRaw)
-       // runMotor(DOWN, 120);
-		//runMotor(DOWN,momentaryPwm(-3000-rawPosition,-3000));
-		//goToPosition(-5000);
-        
-		//else stopMotor();
-        Serial.println("moving down");
-      }
-    }
-  }
-  
-  if ( (buttonDownState == LOW) && (abs(rawPosition-200)>4 ) ) {
-		int tempDistance=rawPosition-200;
-         // runMotor(DOWN,momentaryPwm(tempDistance,200));
-		runMotor(DOWN, 100);
-
-	 //goToPosition(200);
+  if (buttonUpMasterState==HIGH  ){
+	 // Serial.println("HIGH ");
+	analogWrite(pwmPinUp,0);
+	 //pwmValue++;
 	  
-	  /*
-	  runMotor(DOWN,momentaryPwm(rawPosition,-3000));
-	  Serial.print("pwm: ");
-	  Serial.println(momentaryPwm(rawPosition,0));
-	  Serial.print("raw position: ");
-	  Serial.println(rawPosition);
-	  */
+	 // analogWrite(pwmPinUp, 32);  
+  }
+  
+  if (buttonDownMasterState==HIGH){
+	 // Serial.println("HIGH ");
+	analogWrite(pwmPinDown,0);
+	 //pwmValue++;
 	  
+	 // analogWrite(pwmPinUp, 32);  
+  }
+  
+  
+  if (buttonUpMasterState==LOW){
+	 //Serial.println("btn up");
+	 //Serial.println("button press detected ");
 	 
-     
-	  
-	  
-  }
+	  //analogWrite(pwmPinUp, calculatePwmValueManual(movingStartTime, millis() ));
+	  //runMotor(UP,calculatePwmValueManual(movingStartTime, millis() ));
+	 
+	runMotor(DOWN, 200);
+	//analogWrite(pwmPinDown, 20);
+   }
+   
   
-  if (buttonDownState == LOW) {
-	  stopMotor();
-  }
-   //actualDistance=rawPosition-destPosition;
-   //       runMotor(DOWN,momentaryPwm(actualDistance,setDistance));
   
-//if(adcAvg>maxAdcCurrentDownRaw) stopMotor();
+  if (buttonDownMasterState==LOW){
+	 //Serial.println("btn down");
+	 //Serial.println("button press detected ");
+	 //analogWrite(pwmPinUp, 20);
+	 runMotor(DOWN, 20);
+	 // analogWrite(pwmPinDown, calculatePwmValueManual(movingStartTime, millis()));
+	 //analogWrite(pwmPinUp, 127);
+   }
+   
+   
   
-  // set the LED:
-  digitalWrite(ledPin, ledState);
-
-  // save the reading. Next time through the loop, it'll be the lastButtonState:
-  lastButtonUpState = readingUp;
-  lastButtonDownState = readingDown;
     
 	}
 	 
@@ -368,7 +381,7 @@ int goToPosition(int destPosition){
   else if (destPosition < minPosition) destPosition=minPosition;
   
     if(destPosition>rawPosition){//going up
-      while(rawPosition<=destPosition /*&& adcAvg<maxAdcCurrentUpRaw*/ ){
+      while(rawPosition<=destPosition && adcAvg<maxAdcCurrentUpRaw ){
         actualDistance=destPosition-rawPosition;
                 
         runMotor(UP,momentaryPwm(actualDistance,setDistance) );
@@ -380,7 +393,7 @@ int goToPosition(int destPosition){
     else if (destPosition > maxPosition) destPosition=minPosition;
     
     else if(destPosition<rawPosition){//going down
-      while(rawPosition>=destPosition){
+      while(rawPosition>=destPosition && adcAvg<maxAdcCurrentDownRaw){
       actualDistance=rawPosition-destPosition;
           runMotor(DOWN,momentaryPwm(actualDistance,setDistance));
          // Serial.println(rawPosition);
@@ -399,10 +412,7 @@ int momentaryPwm(int momentaryDistance, int initialDistance){
     return pwmArr[initialDistance-momentaryDistance];
     
     else {
-    Serial.print("momentaryPwm wrong range/increasing, initial dist: ");
-	Serial.println(initialDistance);
-	Serial.print("momentary distance: ");
-	Serial.println(momentaryDistance);
+    Serial.println("momentaryPwm wrong range/increasing");
     while(1);
     }
   }
@@ -437,7 +447,7 @@ int momentaryPwm(int momentaryDistance, int initialDistance){
   else return -255;
 }
 
-int calculatePwm (int* arr, int arrSize){
+int calculatePwm (int* arr, int arrSize){//Calculate PWM for automatic operation
  
    const float a=((float)maxPwm-(float)minPwm)/(float)slopeDistance;
    
@@ -450,6 +460,32 @@ int calculatePwm (int* arr, int arrSize){
   return 0;
 }
 
+int calculatePwmValueManual(int startTime, int currentTime){
+	long int timeDifference=currentTime - startTime;
+	//Serial.print("time diff: ");
+	//Serial.println(timeDifference);
+	if (timeDifference<0){
+		Serial.println("negative time!");
+		while (1);
+	}
+	
+	if (timeDifference<slopeTime){
+		//digitalWrite(debugPin, HIGH);
+		//Serial.print("pwm value: ");
+		//Serial.println(timeDifference*255/000);
+		//digitalWrite(debugPin, LOW);
+		if(timeDifference*maxPwm/slopeTime < maxPwm){
+			return timeDifference*maxPwm/slopeTime;
+		}
+		 else return maxPwm;
+		 
+	 }
+	
+	if  (timeDifference>=slopeTime) return maxPwm;
+}
+
+
+
 int normalizationLow(int destPosition){
 	int setDistance=abs(destPosition-rawPosition);
      int actualDistance=0;
@@ -457,8 +493,8 @@ int normalizationLow(int destPosition){
 	 while(rawPosition>=destPosition && adcAvg<maxAdcCurrentDownRaw ){
         actualDistance=rawPosition-destPosition;
                 
-       //runMotor(DOWN,momentaryPwm(actualDistance,setDistance) );
-        runMotor(DOWN,minPwm) ;     
+        runMotor(DOWN,momentaryPwm(actualDistance,setDistance) );
+             
       }
 		
 	stopMotor();
@@ -501,3 +537,59 @@ int goToStoredPos(int storedPosNumb){
 	
 }
 
+int getButtonUpState(){
+	//digitalWrite(debugPin, HIGH);
+	readingUp = digitalRead(buttonPinUp);
+	 if (readingUp != lastButtonUpState) {
+    // reset the debouncing timer
+    lastDebounceUpTime = millis();
+  }
+  
+   if ((millis() - lastDebounceUpTime) > debounceDelay) {//go up
+    // whatever the reading is at, it's been there for longer than the debounce
+    // delay, so take it as the actual current state:
+
+    // if the button state has changed:
+    if (readingUp != buttonUpState) {
+      buttonUpState = readingUp;
+      //Serial.println("button UP state changed");
+	}
+	
+      
+    }
+  
+    // set the LED:
+    // save the reading. Next time through the loop, it'll be the lastButtonState:
+  lastButtonUpState = readingUp;
+  //digitalWrite(debugPin, LOW);
+  return buttonUpState;
+}
+
+int getButtonDownState(){
+	
+	readingDown = digitalRead(buttonPinDown);
+	 if (readingDown != lastButtonDownState) {
+    // reset the debouncing timer
+    lastDebounceDownTime = millis();
+  }
+  
+   if ((millis() - lastDebounceDownTime) > debounceDelay) {//go up
+    // whatever the reading is at, it's been there for longer than the debounce
+    // delay, so take it as the actual current state:
+
+    // if the button state has changed:
+    if (readingDown != buttonDownState) {
+      buttonDownState = readingDown;
+      //Serial.println("button DOWN state changed");
+	}
+	
+      
+    }
+  
+    // set the LED:
+    // save the reading. Next time through the loop, it'll be the lastButtonState:
+  lastButtonDownState = readingDown;
+ 
+  return buttonDownState;
+  
+}

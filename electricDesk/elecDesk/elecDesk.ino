@@ -1,5 +1,5 @@
-/*
-TODO
+/*TODO
+
 
 [X] current sensing + 
 [ ] status flag diagnosis
@@ -13,6 +13,7 @@ TODO
 [ ] calibrate down current readings
 [wip] overcurrent protection when button pressed and in max/min position
 [ ] pwm slope also when stopping from the buttons 
+[ ] repair UP DOWN pinup pindown mess in run motor function
 
 errors and malfunctions detection
 [ ] -missing hall (only one,both)
@@ -67,7 +68,7 @@ const int minPwm=64;
 const int maxPwm=192;
 
 const int slopeDistance=50;//hall ticks needed for smooth motor start - distance for pwn increase/decrease
-const int slopeTime=500;//time [ms] of increasing pwm value for manual operation
+const int slopeTime=1000;//time [ms] of increasing pwm value for manual operation
 const int maxAdcCurrentUpRaw=669;//4000 mA limit; y=a*x+b; a=5.93, b=34.02
 const int maxAdcCurrentDownRaw=500;//3000 mA limit
 const int adcArraySize=100;//size of the array used for averaging adc readouts
@@ -218,13 +219,13 @@ void loop() {
   //runMotor(DOWN, 175);//down because current read will not work
   delay(50);
   
-   Serial.println("waitng for button press");
+   Serial.println("waitng for button to be pressed");
   while(1) {
    //debugPinState= !debugPinState;
    //digitalWrite(debugPin,  debugPinState);
  
   buttonDownMasterState=getButtonDownState(); 
- // buttonUpMasterState=getButtonUpState();
+  buttonUpMasterState=getButtonUpState();
  
   
   //Serial.print("btn low state: ");
@@ -233,7 +234,7 @@ void loop() {
   
  //Button up
   if (buttonUpMasterState==LOW && masterLastUpState==HIGH){
-	 // movingStartTime=millis();
+	  movingStartTime=millis();
 		//Serial.print("up start time: ");
 		//Serial.println(movingStartTime); 
 	  masterLastUpState=LOW;
@@ -249,7 +250,7 @@ void loop() {
  */
   //Button down
   if (buttonDownMasterState==LOW && masterLastDownState==HIGH){
-	  //movingStartTime=millis();
+	  movingStartTime=millis();
 		//Serial.print("down start time: ");
 		//Serial.println(movingStartTime); 
 	  masterLastDownState=LOW;
@@ -286,19 +287,16 @@ void loop() {
 	  //analogWrite(pwmPinUp, calculatePwmValueManual(movingStartTime, millis() ));
 	  //runMotor(UP,calculatePwmValueManual(movingStartTime, millis() ));
 	 
-	runMotor(DOWN, 200);
+	runMotor(DOWN, calculatePwmValueManual(movingStartTime, millis() ));
 	//analogWrite(pwmPinDown, 20);
    }
    
   
   
   if (buttonDownMasterState==LOW){
-	 //Serial.println("btn down");
-	 //Serial.println("button press detected ");
-	 //analogWrite(pwmPinUp, 20);
-	 runMotor(DOWN, 20);
-	 // analogWrite(pwmPinDown, calculatePwmValueManual(movingStartTime, millis()));
-	 //analogWrite(pwmPinUp, 127);
+	
+	runMotor(UP, calculatePwmValueManual(movingStartTime, millis() ));
+	
    }
    
    
@@ -460,7 +458,7 @@ int calculatePwm (int* arr, int arrSize){//Calculate PWM for automatic operation
   return 0;
 }
 
-int calculatePwmValueManual(int startTime, int currentTime){
+int calculatePwmValueManual(int startTime, int currentTime){//geometric problem - can be solved in a bit elegant way
 	long int timeDifference=currentTime - startTime;
 	//Serial.print("time diff: ");
 	//Serial.println(timeDifference);
